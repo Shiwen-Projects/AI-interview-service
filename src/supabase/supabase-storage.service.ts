@@ -1,0 +1,40 @@
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+@Injectable()
+export class SupabaseStorageService {
+  private readonly client: SupabaseClient;
+
+  constructor(private readonly configService: ConfigService) {
+    const supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
+    const serviceRoleKey = this.configService.getOrThrow<string>(
+      'SUPABASE_SERVICE_ROLE_KEY',
+    );
+    this.client = createClient(supabaseUrl, serviceRoleKey);
+  }
+
+  private getCvBucket(): string {
+    return this.configService.getOrThrow<string>('SUPABASE_STORAGE_CV_BUCKET');
+  }
+
+  async uploadCv(file: Express.Multer.File): Promise<string> {
+    const cvId = randomUUID();
+    const cvBucket = this.getCvBucket();
+    const { error } = await this.client.storage
+      .from(cvBucket)
+      .upload(`${cvId}.pdf`, file.buffer, {
+        contentType: 'application/pdf',
+        upsert: false,
+      });
+
+    if (error) {
+      throw new InternalServerErrorException(
+        `CV upload failed: ${error.message}`,
+      );
+    }
+
+    return cvId;
+  }
+}

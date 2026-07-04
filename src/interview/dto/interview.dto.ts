@@ -1,4 +1,4 @@
-import { Transform } from 'class-transformer';
+import { Expose, Transform } from 'class-transformer';
 import { IsNotEmpty, IsString } from 'class-validator';
 import { CREATE_INTERVIEW_SESSION_ERROR_MESSAGES } from '../constants';
 
@@ -16,4 +16,20 @@ export class CreateInterviewSessionDto {
     message: CREATE_INTERVIEW_SESSION_ERROR_MESSAGES.JOB_DESCRIPTION_REQUIRED,
   })
   jobDescription: string;
+}
+
+
+export class InterviewSessionResponseDto {
+  @Expose()
+  id: string;
+  @Expose()
+  post: string;
+  @Expose()
+  jobDescription: string;
+  @Expose()
+  cvId: string;
+  @Expose()
+  createdAt: Date;
+  @Expose()
+  updatedAt: Date;
 }

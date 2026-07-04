@@ -21,16 +21,12 @@ export class InterviewSession {
   @Column({ type: 'text' })
   jobDescription: string;
 
-  @Column({ type: 'text' })
-  cvText: string;
+  @Column({ type: 'uuid' })
+  cvId: string;
 
   // TODO: Implement this
   // @Column({ default: 'generating' })
   // status: InterviewSessionStatus;
-
-  // TODO: Implement this
-  // @OneToMany(() => InterviewQuestion, (question) => question.session)
-  // questions: InterviewQuestion[];
 
   @CreateDateColumn()
   createdAt: Date;

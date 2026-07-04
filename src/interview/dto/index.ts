@@ -1,1 +1,1 @@
-export * from './interview.input';
+export * from './interview.dto';

@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { extractTextFromPdf } from 'src/utils';
+import { SupabaseStorageService } from '../supabase/supabase-storage.service';
 import { Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { InterviewSession } from './entities/interview-session.entity';
-
+import { InterviewSessionResponseDto } from './dto/interview.dto';
 
 type UploadedFile = Express.Multer.File;
 
@@ -12,6 +13,7 @@ export class InterviewService {
   constructor(
     @InjectRepository(InterviewSession)
     private readonly interviewSessionRepository: Repository<InterviewSession>,
+    private readonly supabaseStorageService: SupabaseStorageService,
   ) {}
 
   async createInterviewSession(input: {
@@ -19,16 +21,29 @@ export class InterviewService {
     post: string;
     jobDescription: string;
   }): Promise<{ sessionId: string }> {
-    const cvText = await extractTextFromPdf(input.cv);
-    
+    const sessionId = randomUUID();
+    const cvId = await this.supabaseStorageService.uploadCv(input.cv);
+
     const session = this.interviewSessionRepository.create({
-      cvText,
+      id: sessionId,
+      cvId,
       post: input.post,
       jobDescription: input.jobDescription,
     });
     await this.interviewSessionRepository.save(session);
-    
+
     return { sessionId: session.id };
+  }
+
+  async getInterviewSession(sessionId: string): Promise<InterviewSessionResponseDto> {
+    const session = await this.interviewSessionRepository.findOne({
+      where: { id: sessionId },
+    });
+    if (!session) {
+      throw new NotFoundException('Session not found');
+    } else {
+      return session;
+    }
   }
 
   // TODO: Implement this

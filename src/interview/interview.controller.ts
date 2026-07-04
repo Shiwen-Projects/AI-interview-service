@@ -1,6 +1,9 @@
 import {
   Body,
   Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
   Post,
   UploadedFile,
   UseInterceptors,
@@ -8,7 +11,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CVFileValidationPipe } from './pipes';
 import { InterviewService } from './interview.service';
-import { CreateInterviewSessionDto } from './dto';
+import { CreateInterviewSessionDto, InterviewSessionResponseDto } from './dto';
 
 type UploadedFileType = Express.Multer.File;
 
@@ -24,6 +27,13 @@ export class InterviewController {
     @Body() dto: CreateInterviewSessionDto,
   ): Promise<{ sessionId: string }> {
     return this.interviewService.createInterviewSession({ cv, ...dto });
+  }
+
+  @Get(':sessionId')
+  async getInterviewSession(
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
+  ): Promise<InterviewSessionResponseDto> {
+    return await this.interviewService.getInterviewSession(sessionId);
   }
 
   // TODO: Implement this

@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { InterviewSession } from './entities/interview-session.entity';
 import { InterviewController } from './interview.controller';
 import { InterviewService } from './interview.service';
+import { SupabaseStorageService } from '../supabase';
 
 @Module({
   imports: [
@@ -15,6 +16,6 @@ import { InterviewService } from './interview.service';
     ]),
   ],
   controllers: [InterviewController],
-  providers: [InterviewService],
+  providers: [InterviewService, SupabaseStorageService],
 })
 export class InterviewModule {}

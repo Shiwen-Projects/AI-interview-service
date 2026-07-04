@@ -10,20 +10,16 @@ Extracts CV text, saves a new session to the DB with `status: "generating"`, the
 
 ```ts
 // multipart/form-data
-CreateSessionInput {
-  cv:              File;    // PDF or DOCX — server extracts text server-side
-  post:            string;  // e.g. "Senior Frontend Engineer"
-  jobDescription:  string;  // raw JD text pasted by user
-}
+  cv: File;    // PDF
+  post: string;  // e.g. "Senior Frontend Engineer"
+  jobDescription: string;  // raw JD text pasted by user
 ```
 
 ### Output
 
 ```ts
 // HTTP 201 Created
-CreateSessionPayload {
   sessionId: string;  // UUID, used in all subsequent requests
-}
 ```
 
 ### Flow
@@ -33,18 +29,76 @@ Client                                  Backend
   |                                         |
   |  POST /sessions  { cv, post, jd }       |
   |────────────────────────────────────────>|
-  |                                         |  1. Extract text from CV file
-  |                                         |  2. INSERT session (status: "generating")
-  |                                         |  3. Kick off AI generation (async)
+  |                                         |  1. Store cv file, post and jd
+  |                                         |  2. INSERT session
+  |                                         |  
   |  201 { sessionId: "abc123" }            |
   |<────────────────────────────────────────|
   |                                         |
-  |  navigate to /session/abc123            |
+  |  FE navigate to /session/abc123         |
 ```
 
 ---
 
-## 2. Stream Questions
+## 2. Get Session
+
+**`GET /sessions/:sessionId`**
+
+Fetches a saved session and its questions from the DB. Used when a user **returns to an existing session** (status is already `ready`) — no re-streaming needed.
+
+### Input
+
+```ts
+// URL param
+sessionId: string;
+```
+
+### Output
+
+```ts
+// HTTP 200 OK
+GetSessionPayload {
+  sessionId: string;
+  post: string;
+  jobDescription: string;
+  status: "generating" | "ready" | "error"; 
+  questions:  Question[]; // TODO
+}
+
+Question {
+  questionId:   string;
+  question:     string;
+  category?:    "technical" | "behavioral" | "system_design";
+  answer?:      Answer;  // null if not yet answered
+}
+
+Answer {
+  answerId:       string;
+  answer:         string;
+  overallScore:   number;               // 0–100
+  scoreBreakdown: Record<string, number>; // e.g. { "逻辑性": 90, "完整性": 70 }
+  suggestion:     string;
+}
+```
+
+### Flow
+
+```
+Client                                  Backend
+  |                                         |
+  |  GET /sessions/abc123                   |
+  |────────────────────────────────────────>|
+  |                                         |  SELECT session + questions + answers
+  |  200 { status: "ready", questions: [] } |
+  |<────────────────────────────────────────|
+  |                                         |
+  |  Render questions directly              |
+  |  (no polling or SSE needed)             |
+```
+
+---
+
+## 3. Stream Questions
 
 **`GET /sessions/:sessionId/questions/stream`**
 
@@ -110,62 +164,6 @@ Client                                         Backend
 
 ---
 
-## 3. Get Session
-
-**`GET /sessions/:sessionId`**
-
-Fetches a saved session and its questions from the DB. Used when a user **returns to an existing session** (status is already `ready`) — no re-streaming needed.
-
-### Input
-
-```ts
-// URL param
-sessionId: string;
-```
-
-### Output
-
-```ts
-// HTTP 200 OK
-GetSessionPayload {
-  sessionId:  string;
-  post:       string;
-  status:     "generating" | "ready" | "error";
-  questions:  Question[];
-}
-
-Question {
-  questionId:   string;
-  question:     string;
-  category?:    "technical" | "behavioral" | "system_design";
-  answer?:      Answer;  // null if not yet answered
-}
-
-Answer {
-  answerId:       string;
-  answer:         string;
-  overallScore:   number;               // 0–100
-  scoreBreakdown: Record<string, number>; // e.g. { "逻辑性": 90, "完整性": 70 }
-  suggestion:     string;
-}
-```
-
-### Flow
-
-```
-Client                                  Backend
-  |                                         |
-  |  GET /sessions/abc123                   |
-  |────────────────────────────────────────>|
-  |                                         |  SELECT session + questions + answers
-  |  200 { status: "ready", questions: [] } |
-  |<────────────────────────────────────────|
-  |                                         |
-  |  Render questions directly              |
-  |  (no polling or SSE needed)             |
-```
-
----
 
 ## 4. Submit Answer
 
