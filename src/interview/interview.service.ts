@@ -1,10 +1,25 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { SupabaseStorageService } from '../supabase/supabase-storage.service';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { InterviewSession } from './entities/interview-session.entity';
 import { InterviewSessionResponseDto } from './dto/interview.dto';
+import { extractTextFromPdf } from 'src/utils/files';
+import {
+  getPromptMessage,
+  InterviewQuestionStreamEvent,
+  InterviewSessionStatus,
+} from './constants';
+import { Response } from 'express';
+import { InterviewQuestion } from './entities/interview-question.entity';
+import type { DeepSeekStreamChunk, GeneratedQuestion } from './types';
 
 type UploadedFile = Express.Multer.File;
 
@@ -13,7 +28,11 @@ export class InterviewService {
   constructor(
     @InjectRepository(InterviewSession)
     private readonly interviewSessionRepository: Repository<InterviewSession>,
+    @InjectRepository(InterviewQuestion)
+    private readonly interviewQuestionRepository: Repository<InterviewQuestion>,
+
     private readonly supabaseStorageService: SupabaseStorageService,
+    private readonly configService: ConfigService,
   ) {}
 
   async createInterviewSession(input: {
@@ -27,6 +46,7 @@ export class InterviewService {
     const session = this.interviewSessionRepository.create({
       id: sessionId,
       cvId,
+      status: InterviewSessionStatus.Created,
       post: input.post,
       jobDescription: input.jobDescription,
     });
@@ -35,7 +55,9 @@ export class InterviewService {
     return { sessionId: session.id };
   }
 
-  async getInterviewSession(sessionId: string): Promise<InterviewSessionResponseDto> {
+  async getInterviewSession(
+    sessionId: string,
+  ): Promise<InterviewSessionResponseDto> {
     const session = await this.interviewSessionRepository.findOne({
       where: { id: sessionId },
     });
@@ -46,265 +68,402 @@ export class InterviewService {
     }
   }
 
-  // TODO: Implement this
-  // async streamQuestions(sessionId: string, response: Response): Promise<void> {
-  //   const session = await this.sessionRepository.findOne({
-  //     where: { id: sessionId },
-  //     relations: {
-  //       questions: true,
-  //     },
-  //   });
+  /*
+    This method creates a stream of interview questions for a given session.
+  */
+  async createInterviewStreamQuestions(
+    sessionId: string,
+    response: Response,
+  ): Promise<void> {
+    const session = await this.interviewSessionRepository.findOne({
+      where: { id: sessionId },
+    });
 
-  //   if (!session) {
-  //     throw new NotFoundException('Session not found');
-  //   }
+    if (!session) {
+      throw new NotFoundException('Session not found');
+    }
 
-  //   response.setHeader('Content-Type', 'text/event-stream');
-  //   response.setHeader('Cache-Control', 'no-cache, no-transform');
-  //   response.setHeader('Connection', 'keep-alive');
-  //   response.flushHeaders?.();
+    // Set headers to tell the browser to keep the HTTP connection open for SSE.
+    response.setHeader('Content-Type', 'text/event-stream');
+    response.setHeader('Cache-Control', 'no-cache, no-transform');
+    response.setHeader('Connection', 'keep-alive');
+    response.flushHeaders?.();
 
-  //   let closed = false;
-  //   const sentQuestionIds = new Set<string>();
-  //   const emitter = this.getEmitter(sessionId);
+    // Flag to track if the browser closed the SSE connection.
+    let closed = false;
+    // Controller to abort the DeepSeek request if the browser closes the SSE connection.
+    const abortController = new AbortController();
+    // Event listener to set the closed flag and abort the DeepSeek request if the browser closes the SSE connection.
+    response.on('close', () => {
+      closed = true;
+      abortController.abort();
+    });
 
-  //   const cleanup = () => {
-  //     if (closed) {
-  //       return;
-  //     }
+    try {
+      this.writeSseEvent(response, InterviewQuestionStreamEvent.Preparing, {
+        message: 'Reading CV, position and job description...',
+      });
 
-  //     closed = true;
-  //     emitter.off('question', onQuestion);
-  //     emitter.off('done', onDone);
-  //     emitter.off('error', onError);
-  //   };
+      const cvFile = await this.supabaseStorageService.getCvFile(session.cvId);
+      const cvText = await extractTextFromPdf(cvFile);
+      const prompt = getPromptMessage(
+        cvText,
+        session.post,
+        session.jobDescription,
+      );
 
-  //   const end = () => {
-  //     cleanup();
-  //     response.end();
-  //   };
+      const emittedQuestions: Array<
+        GeneratedQuestion & { questionId: string }
+      > = [];
 
-  //   const sendQuestion = (payload: QuestionEventPayload) => {
-  //     if (closed || sentQuestionIds.has(payload.questionId)) {
-  //       return;
-  //     }
+      this.writeSseEvent(response, InterviewQuestionStreamEvent.Generating, {
+        message: 'Generating interview questions...',
+      });
 
-  //     sentQuestionIds.add(payload.questionId);
-  //     this.writeSseEvent(response, 'question', payload);
-  //   };
+      // Update the session status to generating.
+      await this.interviewSessionRepository.update(sessionId, {
+        status: InterviewSessionStatus.Generating,
+      });
 
-  //   const onQuestion = (payload: QuestionEventPayload) => sendQuestion(payload);
-  //   const onDone = () => {
-  //     this.writeSseEvent(response, 'done');
-  //     end();
-  //   };
-  //   const onError = (payload: ErrorEventPayload) => {
-  //     this.writeSseEvent(response, 'error', payload);
-  //     end();
-  //   };
+      // DeepSeek streams raw JSON tokens; this callback runs each time one full
+      // question object can be parsed from the partial JSON buffer.
+      await this.streamDeepSeekQuestions(
+        prompt,
+        abortController.signal,
+        async (generatedQuestion) => {
+          // If the browser closed the SSE connection, stop generating questions.
+          if (closed) {
+            return;
+          }
 
-  //   emitter.on('question', onQuestion);
-  //   emitter.once('done', onDone);
-  //   emitter.once('error', onError);
-  //   response.on('close', cleanup);
+          // Save the question to the database.
+          const question = await this.interviewQuestionRepository.save(
+            this.interviewQuestionRepository.create({
+              id: randomUUID(),
+              sessionId,
+              question: generatedQuestion.question,
+            }),
+          );
 
-  //   for (const question of this.sortQuestions(session.questions)) {
-  //     sendQuestion(this.toQuestionEvent(question));
-  //   }
+          // Prepare the payload to be sent to the client.
+          const payload = {
+            questionId: question.id,
+            question: question.question,
+          };
 
-  //   if (session.status === 'ready') {
-  //     onDone();
-  //     return;
-  //   }
+          emittedQuestions.push(payload);
 
-  //   if (session.status === 'error') {
-  //     onError({ message: 'Question generation failed' });
-  //     return;
-  //   }
+          // Send the question to the client every time a new question is generated.
+          this.writeSseEvent(
+            response,
+            InterviewQuestionStreamEvent.Question,
+            payload,
+          );
+        },
+      );
 
-  //   if (!this.activeGenerations.has(session.id)) {
-  //     void this.startQuestionGeneration(session.id);
-  //   }
-  // }
+      // If the browser closed the SSE connection, stop sending questions.
+      if (closed) {
+        return;
+      }
 
-  // async getSession(sessionId: string) {
-  //   const session = await this.sessionRepository.findOne({
-  //     where: { id: sessionId },
-  //     relations: {
-  //       questions: {
-  //         answer: true,
-  //       },
-  //     },
-  //   });
+      await this.interviewSessionRepository.update(sessionId, {
+        status: InterviewSessionStatus.Ready,
+      });
+      this.writeSseEvent(response, InterviewQuestionStreamEvent.Done, {
+        count: emittedQuestions.length,
+      });
+      response.end();
+    } catch (error) {
+      if (closed) {
+        return;
+      }
 
-  //   if (!session) {
-  //     throw new NotFoundException('Session not found');
-  //   }
+      await this.interviewSessionRepository.update(sessionId, {
+        status: InterviewSessionStatus.Error,
+      });
+      this.writeSseEvent(response, InterviewQuestionStreamEvent.Error, {
+        message:
+          error instanceof Error ? error.message : 'Question generation failed',
+      });
+      response.end();
+    }
+  }
 
-  //   return {
-  //     sessionId: session.id,
-  //     post: session.post,
-  //     status: session.status,
-  //     questions: this.sortQuestions(session.questions).map((question) => ({
-  //       questionId: question.id,
-  //       question: question.question,
-  //       category: question.category,
-  //       answer: question.answer
-  //         ? {
-  //             answerId: question.answer.id,
-  //             answer: question.answer.answer,
-  //             overallScore: question.answer.overallScore,
-  //             scoreBreakdown: question.answer.scoreBreakdown,
-  //             suggestion: question.answer.suggestion,
-  //           }
-  //         : null,
-  //     })),
-  //   };
-  // }
+  private async streamDeepSeekQuestions(
+    prompt: string,
+    signal: AbortSignal,
+    onQuestion: (question: GeneratedQuestion) => Promise<void>,
+  ): Promise<void> {
+    const apiKey = this.deepSeekApiKey;
+    const baseUrl = this.deepSeekBaseUrl;
+    const model = this.deepSeekModel;
 
-  // async submitAnswer(
-  //   sessionId: string,
-  //   questionId: string,
-  //   dto: SubmitAnswerDto,
-  // ) {
-  //   if (!dto.answer?.trim()) {
-  //     throw new BadRequestException('answer is required');
-  //   }
+    const apiResponse = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      signal,
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You generate interview questions and return only valid json.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.4,
+        stream: true,
+        response_format: { type: 'json_object' },
+      }),
+    });
 
-  //   const question = await this.questionRepository.findOne({
-  //     where: {
-  //       id: questionId,
-  //       sessionId,
-  //     },
-  //     relations: {
-  //       session: true,
-  //       answer: true,
-  //     },
-  //   });
+    if (!apiResponse.ok) {
+      throw new BadGatewayException(
+        `DeepSeek request failed with status ${apiResponse.status}`,
+      );
+    }
 
-  //   if (!question) {
-  //     throw new NotFoundException('Question not found');
-  //   }
+    if (!apiResponse.body) {
+      throw new BadGatewayException('DeepSeek response did not include a body');
+    }
 
-  //   const answer =
-  //     question.answer ??
-  //     this.answerRepository.create({
-  //       questionId: question.id,
-  //     });
+    const reader = apiResponse.body.getReader();
+    // Decode the response body as text.
+    const decoder = new TextDecoder();
+    // Track DeepSeek's event frames.
+    let sseBuffer = '';
+    // Track the model's streamed JSON text inside those frames.
+    let contentBuffer = '';
+    // Track the number of questions emitted.
+    let emittedQuestionCount = 0;
+    // Read the response body chunk by chunk.
+    while (true) {
+      const { done, value } = await reader.read();
 
-  //   answer.answer = dto.answer.trim();
-  //   await this.answerRepository.save(answer);
+      if (done) {
+        break;
+      }
 
-  //   const evaluation = await this.interviewAiService.evaluateAnswer({
-  //     question: question.question,
-  //     answer: answer.answer,
-  //     post: question.session.post,
-  //     jobDescription: question.session.jobDescription,
-  //   });
+      sseBuffer += decoder.decode(value, { stream: true });
+      // DeepSeek sends SSE frames separated by a blank line. The final split
+      // item may be incomplete, so keep it for the next chunk.
+      const events = sseBuffer.split('\n\n');
+      sseBuffer = events.pop() ?? '';
 
-  //   answer.overallScore = evaluation.overallScore;
-  //   answer.scoreBreakdown = evaluation.scoreBreakdown;
-  //   answer.suggestion = evaluation.suggestion;
-  //   const savedAnswer = await this.answerRepository.save(answer);
+      for (const event of events) {
+        const data = this.getSseData(event);
 
-  //   return {
-  //     answerId: savedAnswer.id,
-  //     overallScore: savedAnswer.overallScore,
-  //     scoreBreakdown: savedAnswer.scoreBreakdown,
-  //     suggestion: savedAnswer.suggestion,
-  //   };
-  // }
+        if (!data || data === '[DONE]') {
+          continue;
+        }
 
-  // private async startQuestionGeneration(sessionId: string): Promise<void> {
-  //   if (this.activeGenerations.has(sessionId)) {
-  //     return;
-  //   }
+        const chunk = JSON.parse(data) as DeepSeekStreamChunk;
+        const delta = chunk.choices?.[0]?.delta?.content;
 
-  //   this.activeGenerations.add(sessionId);
-  //   const emitter = this.getEmitter(sessionId);
+        if (!delta) {
+          continue;
+        }
 
-  //   try {
-  //     const session = await this.sessionRepository.findOne({
-  //       where: { id: sessionId },
-  //       relations: {
-  //         questions: true,
-  //       },
-  //     });
+        contentBuffer += delta;
 
-  //     if (!session || session.status !== 'generating') {
-  //       return;
-  //     }
+        // JSON mode still arrives token-by-token, so parse only completed
+        // question objects instead of waiting for the full response.
+        const questions = this.extractQuestionsFromJsonStream(contentBuffer);
 
-  //     const existingCount = session.questions?.length ?? 0;
-  //     const questions = await this.interviewAiService.generateQuestions({
-  //       cvText: session.cvText,
-  //       post: session.post,
-  //       jobDescription: session.jobDescription,
-  //     });
+        while (emittedQuestionCount < questions.length) {
+          await onQuestion(questions[emittedQuestionCount]);
+          emittedQuestionCount += 1;
+        }
+      }
+    }
 
-  //     for (const [index, generatedQuestion] of questions.entries()) {
-  //       const question = await this.questionRepository.save(
-  //         this.questionRepository.create({
-  //           sessionId,
-  //           question: generatedQuestion.question,
-  //           category: generatedQuestion.category,
-  //           order: existingCount + index + 1,
-  //         }),
-  //       );
+    const questions = this.extractQuestionsFromJsonStream(contentBuffer);
 
-  //       emitter.emit('question', this.toQuestionEvent(question));
-  //     }
+    while (emittedQuestionCount < questions.length) {
+      await onQuestion(questions[emittedQuestionCount]);
+      emittedQuestionCount += 1;
+    }
 
-  //     await this.sessionRepository.update(sessionId, { status: 'ready' });
-  //     emitter.emit('done');
-  //   } catch (error) {
-  //     await this.sessionRepository.update(sessionId, { status: 'error' });
-  //     emitter.emit('error', {
-  //       message:
-  //         error instanceof Error
-  //           ? error.message
-  //           : 'Question generation failed',
-  //     });
-  //   } finally {
-  //     this.activeGenerations.delete(sessionId);
-  //   }
-  // }
+    if (emittedQuestionCount === 0) {
+      throw new BadGatewayException('DeepSeek did not return any questions');
+    }
+  }
 
-  // private getEmitter(sessionId: string): EventEmitter {
-  //   const existing = this.emitters.get(sessionId);
 
-  //   if (existing) {
-  //     return existing;
-  //   }
+  /*
+    Parse the sse data (e.g. data: {"choices":[{"delta":{"content":"{\"question\":\"What is your name?\"}"}}]}) 
+    into a string (e.g. {"question":"What is your name?"}).
+  */
+  private getSseData(event: string): string {
+    return event
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.replace(/^data:\s?/, ''))
+      .join('\n')
+      .trim();
+  }
 
-  //   const emitter = new EventEmitter();
-  //   this.emitters.set(sessionId, emitter);
-  //   return emitter;
-  // }
+  /*
+  @description: This method extracts questions from a JSON stream.
+    @param content: The JSON stream to extract questions from.
+    @example:
+    ```json
+    {
+      "questions": [
+        { "question": "What is your name?" }
+      ]
+    }
+    ```
+    @returns An array of generated questions.
+  */
+  private extractQuestionsFromJsonStream(content: string): GeneratedQuestion[] {
+    // The full JSON object may not be complete yet, but individual objects in
+    // "questions" can already be complete enough to parse and stream onward.
+    const questionsKeyIndex = content.indexOf('"questions"');
 
-  // private toQuestionEvent(question: InterviewQuestion): QuestionEventPayload {
-  //   return {
-  //     questionId: question.id,
-  //     question: question.question,
-  //     category: question.category,
-  //   };
-  // }
+    if (questionsKeyIndex === -1) {
+      return [];
+    }
 
-  // private sortQuestions(questions: InterviewQuestion[] = []) {
-  //   return [...questions].sort((left, right) => left.order - right.order);
-  // }
+    const arrayStartIndex = content.indexOf('[', questionsKeyIndex);
 
-  // private writeSseEvent(
-  //   response: Response,
-  //   event: string,
-  //   payload?: unknown,
-  // ): void {
-  //   response.write(`event: ${event}\n`);
+    if (arrayStartIndex === -1) {
+      return [];
+    }
 
-  //   if (payload) {
-  //     response.write(`data: ${JSON.stringify(payload)}\n`);
-  //   }
+    const questions: GeneratedQuestion[] = [];
+    let objectStartIndex = -1;
+    // Track the depth of the JSON object: meet { depth += 1, meet } depth -= 1
+    let depth = 0;
+    // Track if the current character is inside a string: meet " isInString = true, meet " again isInString = false
+    let isInString = false;
+    // Track if the current character is escaped: meet \ isEscaped = true, meet \ again isEscaped = false
+    let isEscaped = false;
 
-  //   response.write('\n');
-  // }
+    // Walk the partial JSON manually so braces inside markdown/text do not
+    // accidentally look like object boundaries.
+    for (let index = arrayStartIndex + 1; index < content.length; index += 1) {
+      const char = content[index];
+
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+
+      if (char === '\\') {
+        isEscaped = true;
+        continue;
+      }
+
+      if (char === '"') {
+        isInString = !isInString;
+        continue;
+      }
+
+      if (isInString) {
+        continue;
+      }
+
+      if (char === '{') {
+        if (depth === 0) {
+          objectStartIndex = index;
+        }
+
+        depth += 1;
+        continue;
+      }
+
+      if (char === '}') {
+        depth -= 1;
+
+        // when a question object is complete, parse it and add it to the questions array
+        if (depth === 0 && objectStartIndex !== -1) {
+          const question = this.parseGeneratedQuestion(
+            content.slice(objectStartIndex, index + 1), // e.g. { "question": "What is your name?", "category": ["React", "TypeScript", "JavaScript"] }
+          );
+
+          if (question) {
+            questions.push(question);
+          }
+
+          objectStartIndex = -1;
+        }
+      }
+    }
+
+    return questions;
+  }
+
+  private parseGeneratedQuestion(rawJson: string): GeneratedQuestion | null {
+    try {
+      const value = JSON.parse(rawJson) as Record<string, unknown>;
+      const question = String(value.question ?? '').trim();
+
+      if (!question) {
+        return null;
+      }
+
+      return {
+        question,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private writeSseEvent(
+    response: Response,
+    event: InterviewQuestionStreamEvent,
+    payload?: unknown,
+  ): void {
+    // SSE format requires "event" and "data" lines followed by a blank line.
+    response.write(`event: ${event}\n`);
+
+    if (payload) {
+      response.write(`data: ${JSON.stringify(payload)}\n`);
+    }
+
+    response.write('\n');
+  }
+
+  private get deepSeekApiKey(): string {
+    const apiKey = this.configService.get<string>('DEEPSEEK_API_KEY');
+    if (!apiKey) {
+      throw new InternalServerErrorException(
+        'DeepSeek API key is not configured',
+      );
+    }
+
+    return apiKey;
+  }
+
+  private get deepSeekBaseUrl(): string {
+    const baseUrl = this.configService.get<string>('DEEPSEEK_BASE_URL');
+    if (!baseUrl) {
+      throw new InternalServerErrorException(
+        'DeepSeek base URL is not configured',
+      );
+    }
+
+    return baseUrl;
+  }
+
+  private get deepSeekModel(): string {
+    const model = this.configService.get<string>('DEEPSEEK_MODEL');
+    if (!model) {
+      throw new InternalServerErrorException(
+        'DeepSeek model is not configured',
+      );
+    }
+
+    return model;
+  }
 }

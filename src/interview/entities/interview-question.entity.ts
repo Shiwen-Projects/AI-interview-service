@@ -5,28 +5,25 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { InterviewSessionStatus } from '../constants';
 
-@Entity('sessions')
-export class InterviewSession {
+@Entity('questions')
+export class InterviewQuestion {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Column()
-  post: string;
+  sessionId: string;
 
   @Column({ type: 'text' })
-  jobDescription: string;
-
-  @Column({ type: 'uuid' })
-  cvId: string;
-
-  @Column({ default: InterviewSessionStatus.Generating })
-  status: InterviewSessionStatus;
+  question: string;
 
   @CreateDateColumn()
   createdAt: Date;
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+    // TODO: Add category and answer SOON
+    //   @Column({ nullable: true })
+    //   category?: QuestionCategory;
 }

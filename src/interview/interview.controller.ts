@@ -5,10 +5,12 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response as ExpressResponse } from 'express';
 import { CVFileValidationPipe } from './pipes';
 import { InterviewService } from './interview.service';
 import { CreateInterviewSessionDto, InterviewSessionResponseDto } from './dto';
@@ -36,26 +38,14 @@ export class InterviewController {
     return await this.interviewService.getInterviewSession(sessionId);
   }
 
-  // TODO: Implement this
-  // @Get(':sessionId/questions/stream')
-  // streamQuestions(
-  //   @Param('sessionId') sessionId: string,
-  //   @Res() response: Response,
-  // ) {
-  //   return this.interviewService.streamQuestions(sessionId, response);
-  // }
-
-  // @Get(':sessionId')
-  // getSession(@Param('sessionId') sessionId: string) {
-  //   return this.interviewService.getSession(sessionId);
-  // }
-
-  // @Post(':sessionId/questions/:questionId/answers')
-  // submitAnswer(
-  //   @Param('sessionId') sessionId: string,
-  //   @Param('questionId') questionId: string,
-  //   @Body() dto: SubmitAnswerDto,
-  // ) {
-  //   return this.interviewService.submitAnswer(sessionId, questionId, dto);
-  // }
+  @Get(':sessionId/questions/stream')
+  async createInterviewStreamQuestions(
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
+    @Res() response: ExpressResponse,
+  ): Promise<void> {
+    return await this.interviewService.createInterviewStreamQuestions(
+      sessionId,
+      response,
+    );
+  }
 }
