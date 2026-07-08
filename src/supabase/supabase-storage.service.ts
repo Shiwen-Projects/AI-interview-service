@@ -37,4 +37,27 @@ export class SupabaseStorageService {
 
     return cvId;
   }
+
+  async getCvFile(cvId: string): Promise<Express.Multer.File> {
+    const cvBucket = this.getCvBucket();
+    const { data, error } = await this.client.storage
+      .from(cvBucket)
+      .download(`${cvId}.pdf`);
+    if (error) {
+      throw new InternalServerErrorException(
+        `CV download failed: ${error.message}`,
+      );
+    }
+
+    const buffer = Buffer.from(await data.arrayBuffer());
+
+    return {
+      fieldname: 'cv',
+      originalname: `${cvId}.pdf`,
+      encoding: '7bit',
+      mimetype: 'application/pdf',
+      size: buffer.length,
+      buffer,
+    } as Express.Multer.File;
+  }
 }
