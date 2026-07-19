@@ -9,19 +9,19 @@ import {
 @Entity('questions')
 export class InterviewQuestion {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  sessionId: string;
+  sessionId!: string;
 
   @Column({ type: 'text' })
-  question: string;
+  question!: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 
     // TODO: Add category and answer SOON
     //   @Column({ nullable: true })
