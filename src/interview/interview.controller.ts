@@ -15,8 +15,6 @@ import { CVFileValidationPipe } from './pipes';
 import { InterviewService } from './interview.service';
 import { CreateInterviewSessionDto, InterviewSessionResponseDto } from './dto';
 
-type UploadedFileType = Express.Multer.File;
-
 @Controller('sessions')
 export class InterviewController {
   // Inject the InterviewService to handle the business logic
@@ -25,7 +23,7 @@ export class InterviewController {
   @Post()
   @UseInterceptors(FileInterceptor('cv'))
   createInterviewSession(
-    @UploadedFile(CVFileValidationPipe) cv: UploadedFileType,
+    @UploadedFile(CVFileValidationPipe) cv: Express.Multer.File,
     @Body() dto: CreateInterviewSessionDto,
   ): Promise<{ sessionId: string }> {
     return this.interviewService.createInterviewSession({ cv, ...dto });

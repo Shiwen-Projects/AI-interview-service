@@ -21,8 +21,6 @@ import { Response } from 'express';
 import { InterviewQuestion } from './entities/interview-question.entity';
 import type { DeepSeekStreamChunk, GeneratedQuestion } from './types';
 
-type UploadedFile = Express.Multer.File;
-
 @Injectable()
 export class InterviewService {
   constructor(
@@ -36,7 +34,7 @@ export class InterviewService {
   ) {}
 
   async createInterviewSession(input: {
-    cv: UploadedFile;
+    cv: Express.Multer.File;
     post: string;
     jobDescription: string;
   }): Promise<{ sessionId: string }> {
@@ -58,14 +56,41 @@ export class InterviewService {
   async getInterviewSession(
     sessionId: string,
   ): Promise<InterviewSessionResponseDto> {
-    const session = await this.interviewSessionRepository.findOne({
+    const session: InterviewSession | null = await this.interviewSessionRepository.findOne({
       where: { id: sessionId },
+      select: {
+        id: true,
+        jobDescription: true,
+        post: true,
+        cvId: true,
+      },
     });
+
     if (!session) {
       throw new NotFoundException('Session not found');
-    } else {
-      return session;
     }
+
+    const questions: InterviewQuestion[] = await this.interviewQuestionRepository.find({
+      where: { sessionId: session.id },
+      select: {
+        id: true,
+        question: true,
+      },
+      order: {
+        createdAt: 'ASC',
+      },
+    });
+
+    return {
+      id: session.id,
+      jobDescription: session.jobDescription,
+      post: session.post,
+      cvId: session.cvId,
+      questions: questions.map((question) => ({
+        id: question.id,
+        question: question.question,
+      })),
+    };
   }
 
   /*
@@ -285,8 +310,8 @@ export class InterviewService {
       }
     }
 
+    // Do it again for the last time to ensure we get all the questions
     const questions = this.extractQuestionsFromJsonStream(contentBuffer);
-
     while (emittedQuestionCount < questions.length) {
       await onQuestion(questions[emittedQuestionCount]);
       emittedQuestionCount += 1;
@@ -296,7 +321,6 @@ export class InterviewService {
       throw new BadGatewayException('DeepSeek did not return any questions');
     }
   }
-
 
   /*
     Parse the sse data (e.g. data: {"choices":[{"delta":{"content":"{\"question\":\"What is your name?\"}"}}]}) 

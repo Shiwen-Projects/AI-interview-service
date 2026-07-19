@@ -10,23 +10,23 @@ import { InterviewSessionStatus } from '../constants';
 @Entity('sessions')
 export class InterviewSession {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  post: string;
+  post!: string;
 
   @Column({ type: 'text' })
-  jobDescription: string;
+  jobDescription!: string;
 
   @Column({ type: 'uuid' })
-  cvId: string;
+  cvId!: string;
 
   @Column({ default: InterviewSessionStatus.Generating })
-  status: InterviewSessionStatus;
+  status!: InterviewSessionStatus;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

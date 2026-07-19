@@ -8,28 +8,32 @@ export class CreateInterviewSessionDto {
   @IsNotEmpty({
     message: CREATE_INTERVIEW_SESSION_ERROR_MESSAGES.POST_REQUIRED,
   })
-  post: string;
+  post!: string;
 
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsNotEmpty({
     message: CREATE_INTERVIEW_SESSION_ERROR_MESSAGES.JOB_DESCRIPTION_REQUIRED,
   })
-  jobDescription: string;
+  jobDescription!: string;
 }
 
+export class QuestionDto {
+  @Expose()
+  id!: string;
+  @Expose()
+  question!: string;
+}
 
 export class InterviewSessionResponseDto {
   @Expose()
-  id: string;
+  id!: string;
   @Expose()
-  post: string;
+  post!: string;
   @Expose()
-  jobDescription: string;
+  jobDescription!: string;
   @Expose()
-  cvId: string;
+  cvId!: string;
   @Expose()
-  createdAt: Date;
-  @Expose()
-  updatedAt: Date;
+  questions!: QuestionDto[];
 }

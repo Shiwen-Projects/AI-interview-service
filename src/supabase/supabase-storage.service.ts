@@ -1,6 +1,7 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
+import { Readable } from 'stream';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 @Injectable()
@@ -50,10 +51,11 @@ export class SupabaseStorageService {
     }
 
     const buffer = Buffer.from(await data.arrayBuffer());
+    const filename = `${cvId}.pdf`;
 
     return {
       fieldname: 'cv',
-      originalname: `${cvId}.pdf`,
+      originalname: filename,
       encoding: '7bit',
       mimetype: 'application/pdf',
       size: buffer.length,
