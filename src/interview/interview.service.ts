@@ -9,9 +9,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { SupabaseStorageService } from '../supabase/supabase-storage.service';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
+import { extractTextFromPdf } from '@/utils/files';
 import { InterviewSession } from './entities/interview-session.entity';
 import { InterviewSessionResponseDto } from './dto/interview.dto';
-import { extractTextFromPdf } from 'src/utils/files';
 import {
   getPromptMessage,
   InterviewQuestionStreamEvent,
