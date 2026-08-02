@@ -1,8 +1,8 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
-import { Readable } from 'stream';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { FileType } from '../interview/types';
 
 @Injectable()
 export class SupabaseStorageService {
@@ -20,12 +20,13 @@ export class SupabaseStorageService {
     return this.configService.getOrThrow<string>('SUPABASE_STORAGE_CV_BUCKET');
   }
 
-  async uploadCv(file: Express.Multer.File): Promise<string> {
-    const cvId = randomUUID();
+  async uploadCv(file: Express.Multer.File): Promise<FileType> {
+    const id = randomUUID();
+    const filename = file.originalname;
     const cvBucket = this.getCvBucket();
     const { error } = await this.client.storage
       .from(cvBucket)
-      .upload(`${cvId}.pdf`, file.buffer, {
+      .upload(`${filename}`, file.buffer, {
         contentType: 'application/pdf',
         upsert: false,
       });
@@ -36,7 +37,7 @@ export class SupabaseStorageService {
       );
     }
 
-    return cvId;
+    return { id, name: filename };  
   }
 
   async getCvFile(cvId: string): Promise<Express.Multer.File> {

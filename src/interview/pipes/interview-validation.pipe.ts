@@ -3,7 +3,7 @@ import {
   MaxFileSizeValidator,
   FileTypeValidator,
 } from '@nestjs/common';
-import { CREATE_INTERVIEW_SESSION_ERROR_MESSAGES } from '../constants';
+import { CREATE_INTERVIEW_SESSION_ERROR_MESSAGES } from '../messages';
 
 export const CVFileValidationPipe = new ParseFilePipe({
   validators: [

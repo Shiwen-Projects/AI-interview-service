@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { InterviewSessionStatus } from '../constants';
+import type { FileType } from '../types';
 
 @Entity('sessions')
 export class InterviewSession {
@@ -18,8 +19,11 @@ export class InterviewSession {
   @Column({ type: 'text' })
   jobDescription!: string;
 
-  @Column({ type: 'uuid' })
-  cvId!: string;
+  @Column({ type: 'jsonb' })
+  cv!: FileType;
+
+  @Column({ type: 'text' })
+  cvContent!: string;
 
   @Column({ default: InterviewSessionStatus.Generating })
   status!: InterviewSessionStatus;
