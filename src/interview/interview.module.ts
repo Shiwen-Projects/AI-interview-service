@@ -12,7 +12,6 @@ import { SupabaseStorageService } from '../supabase';
     TypeOrmModule.forFeature([
       InterviewSession,
       InterviewQuestion,
-      // InterviewAnswer,
     ]),
   ],
   controllers: [InterviewController],

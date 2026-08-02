@@ -1,6 +1,7 @@
 import { Expose, Transform } from 'class-transformer';
 import { IsNotEmpty, IsString } from 'class-validator';
-import { CREATE_INTERVIEW_SESSION_ERROR_MESSAGES } from '../constants';
+import { CREATE_INTERVIEW_SESSION_ERROR_MESSAGES } from '../messages';
+import type { FileType } from '../types';
 
 export class CreateInterviewSessionDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
@@ -33,7 +34,7 @@ export class InterviewSessionResponseDto {
   @Expose()
   jobDescription!: string;
   @Expose()
-  cvId!: string;
+  cv!: FileType;
   @Expose()
   questions!: QuestionDto[];
 }

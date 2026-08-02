@@ -13,13 +13,15 @@ import { extractTextFromPdf } from '@/utils/files';
 import { InterviewSession } from './entities/interview-session.entity';
 import { InterviewSessionResponseDto } from './dto/interview.dto';
 import {
-  getPromptMessage,
   InterviewQuestionStreamEvent,
   InterviewSessionStatus,
 } from './constants';
+import { getPromptMessage } from './messages';
 import { Response } from 'express';
 import { InterviewQuestion } from './entities/interview-question.entity';
 import type { DeepSeekStreamChunk, GeneratedQuestion } from './types';
+import { extractQuestionsFromJsonStream } from './utils';
+import { extractTextFromPdf } from 'src/utils/files';
 
 @Injectable()
 export class InterviewService {
@@ -39,11 +41,17 @@ export class InterviewService {
     jobDescription: string;
   }): Promise<{ sessionId: string }> {
     const sessionId = randomUUID();
-    const cvId = await this.supabaseStorageService.uploadCv(input.cv);
+    const cvFile = await this.supabaseStorageService.uploadCv(input.cv);
+    const cvContent = await extractTextFromPdf(input.cv);
+
+    if (!cvContent) {
+      throw new InternalServerErrorException('Failed to extract text from CV');
+    }
 
     const session = this.interviewSessionRepository.create({
       id: sessionId,
-      cvId,
+      cv: cvFile,
+      cvContent,
       status: InterviewSessionStatus.Created,
       post: input.post,
       jobDescription: input.jobDescription,
@@ -62,7 +70,9 @@ export class InterviewService {
         id: true,
         jobDescription: true,
         post: true,
-        cvId: true,
+        cv: {
+          id: true,
+        },
       },
     });
 
@@ -85,7 +95,7 @@ export class InterviewService {
       id: session.id,
       jobDescription: session.jobDescription,
       post: session.post,
-      cvId: session.cvId,
+      cv: session.cv,
       questions: questions.map((question) => ({
         id: question.id,
         question: question.question,
@@ -129,10 +139,11 @@ export class InterviewService {
         message: 'Reading CV, position and job description...',
       });
 
-      const cvFile = await this.supabaseStorageService.getCvFile(session.cvId);
-      const cvText = await extractTextFromPdf(cvFile);
+      console.log('preparing - Reading CV, position and job description...');
+
+      const cvContent = session.cvContent;
       const prompt = getPromptMessage(
-        cvText,
+        cvContent,
         session.post,
         session.jobDescription,
       );
@@ -144,6 +155,8 @@ export class InterviewService {
       this.writeSseEvent(response, InterviewQuestionStreamEvent.Generating, {
         message: 'Generating interview questions...',
       });
+
+      console.log('generating - Generating interview questions...');
 
       // Update the session status to generating.
       await this.interviewSessionRepository.update(sessionId, {
@@ -169,6 +182,8 @@ export class InterviewService {
               question: generatedQuestion.question,
             }),
           );
+
+          console.log('question: ', question);
 
           // Prepare the payload to be sent to the client.
           const payload = {
@@ -301,7 +316,7 @@ export class InterviewService {
 
         // JSON mode still arrives token-by-token, so parse only completed
         // question objects instead of waiting for the full response.
-        const questions = this.extractQuestionsFromJsonStream(contentBuffer);
+        const questions = extractQuestionsFromJsonStream(contentBuffer);
 
         while (emittedQuestionCount < questions.length) {
           await onQuestion(questions[emittedQuestionCount]);
@@ -311,7 +326,7 @@ export class InterviewService {
     }
 
     // Do it again for the last time to ensure we get all the questions
-    const questions = this.extractQuestionsFromJsonStream(contentBuffer);
+    const questions = extractQuestionsFromJsonStream(contentBuffer);
     while (emittedQuestionCount < questions.length) {
       await onQuestion(questions[emittedQuestionCount]);
       emittedQuestionCount += 1;
@@ -335,113 +350,6 @@ export class InterviewService {
       .trim();
   }
 
-  /*
-  @description: This method extracts questions from a JSON stream.
-    @param content: The JSON stream to extract questions from.
-    @example:
-    ```json
-    {
-      "questions": [
-        { "question": "What is your name?" }
-      ]
-    }
-    ```
-    @returns An array of generated questions.
-  */
-  private extractQuestionsFromJsonStream(content: string): GeneratedQuestion[] {
-    // The full JSON object may not be complete yet, but individual objects in
-    // "questions" can already be complete enough to parse and stream onward.
-    const questionsKeyIndex = content.indexOf('"questions"');
-
-    if (questionsKeyIndex === -1) {
-      return [];
-    }
-
-    const arrayStartIndex = content.indexOf('[', questionsKeyIndex);
-
-    if (arrayStartIndex === -1) {
-      return [];
-    }
-
-    const questions: GeneratedQuestion[] = [];
-    let objectStartIndex = -1;
-    // Track the depth of the JSON object: meet { depth += 1, meet } depth -= 1
-    let depth = 0;
-    // Track if the current character is inside a string: meet " isInString = true, meet " again isInString = false
-    let isInString = false;
-    // Track if the current character is escaped: meet \ isEscaped = true, meet \ again isEscaped = false
-    let isEscaped = false;
-
-    // Walk the partial JSON manually so braces inside markdown/text do not
-    // accidentally look like object boundaries.
-    for (let index = arrayStartIndex + 1; index < content.length; index += 1) {
-      const char = content[index];
-
-      if (isEscaped) {
-        isEscaped = false;
-        continue;
-      }
-
-      if (char === '\\') {
-        isEscaped = true;
-        continue;
-      }
-
-      if (char === '"') {
-        isInString = !isInString;
-        continue;
-      }
-
-      if (isInString) {
-        continue;
-      }
-
-      if (char === '{') {
-        if (depth === 0) {
-          objectStartIndex = index;
-        }
-
-        depth += 1;
-        continue;
-      }
-
-      if (char === '}') {
-        depth -= 1;
-
-        // when a question object is complete, parse it and add it to the questions array
-        if (depth === 0 && objectStartIndex !== -1) {
-          const question = this.parseGeneratedQuestion(
-            content.slice(objectStartIndex, index + 1), // e.g. { "question": "What is your name?", "category": ["React", "TypeScript", "JavaScript"] }
-          );
-
-          if (question) {
-            questions.push(question);
-          }
-
-          objectStartIndex = -1;
-        }
-      }
-    }
-
-    return questions;
-  }
-
-  private parseGeneratedQuestion(rawJson: string): GeneratedQuestion | null {
-    try {
-      const value = JSON.parse(rawJson) as Record<string, unknown>;
-      const question = String(value.question ?? '').trim();
-
-      if (!question) {
-        return null;
-      }
-
-      return {
-        question,
-      };
-    } catch {
-      return null;
-    }
-  }
 
   private writeSseEvent(
     response: Response,
