@@ -5,7 +5,7 @@ import { InterviewQuestion } from './entities/interview-question.entity';
 import { InterviewSession } from './entities/interview-session.entity';
 import { InterviewController } from './interview.controller';
 import { InterviewService } from './interview.service';
-import { SupabaseStorageService } from '../supabase';
+import { SupabaseStorageModule } from '../supabase';
 
 @Module({
   imports: [
@@ -13,8 +13,9 @@ import { SupabaseStorageService } from '../supabase';
       InterviewSession,
       InterviewQuestion,
     ]),
+    SupabaseStorageModule,
   ],
   controllers: [InterviewController],
-  providers: [InterviewService, SupabaseStorageService],
+  providers: [InterviewService],
 })
 export class InterviewModule {}

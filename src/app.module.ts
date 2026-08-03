@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { InterviewModule } from './interview/interview.module';
+import { SupabaseStorageModule } from './supabase';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { InterviewModule } from './interview/interview.module';
       }),
     }),
     InterviewModule,
+    SupabaseStorageModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -9,7 +9,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { SupabaseStorageService } from '../supabase/supabase-storage.service';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
-import { extractTextFromPdf } from '@/utils/files';
 import { InterviewSession } from './entities/interview-session.entity';
 import { InterviewSessionResponseDto } from './dto/interview.dto';
 import {
@@ -21,7 +20,7 @@ import { Response } from 'express';
 import { InterviewQuestion } from './entities/interview-question.entity';
 import type { DeepSeekStreamChunk, GeneratedQuestion } from './types';
 import { extractQuestionsFromJsonStream } from './utils';
-import { extractTextFromPdf } from 'src/utils/files';
+import { extractTextFromPdf } from '../utils/files';
 
 @Injectable()
 export class InterviewService {
@@ -64,32 +63,34 @@ export class InterviewService {
   async getInterviewSession(
     sessionId: string,
   ): Promise<InterviewSessionResponseDto> {
-    const session: InterviewSession | null = await this.interviewSessionRepository.findOne({
-      where: { id: sessionId },
-      select: {
-        id: true,
-        jobDescription: true,
-        post: true,
-        cv: {
+    const session: InterviewSession | null =
+      await this.interviewSessionRepository.findOne({
+        where: { id: sessionId },
+        select: {
           id: true,
+          jobDescription: true,
+          post: true,
+          cv: {
+            id: true,
+          },
         },
-      },
-    });
+      });
 
     if (!session) {
       throw new NotFoundException('Session not found');
     }
 
-    const questions: InterviewQuestion[] = await this.interviewQuestionRepository.find({
-      where: { sessionId: session.id },
-      select: {
-        id: true,
-        question: true,
-      },
-      order: {
-        createdAt: 'ASC',
-      },
-    });
+    const questions: InterviewQuestion[] =
+      await this.interviewQuestionRepository.find({
+        where: { sessionId: session.id },
+        select: {
+          id: true,
+          question: true,
+        },
+        order: {
+          createdAt: 'ASC',
+        },
+      });
 
     return {
       id: session.id,
@@ -349,7 +350,6 @@ export class InterviewService {
       .join('\n')
       .trim();
   }
-
 
   private writeSseEvent(
     response: Response,

@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  StreamableFile,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -26,7 +30,7 @@ export class SupabaseStorageService {
     const cvBucket = this.getCvBucket();
     const { error } = await this.client.storage
       .from(cvBucket)
-      .upload(`${filename}`, file.buffer, {
+      .upload(`${id}.pdf`, file.buffer, {
         contentType: 'application/pdf',
         upsert: false,
       });
@@ -37,11 +41,12 @@ export class SupabaseStorageService {
       );
     }
 
-    return { id, name: filename };  
+    return { id, name: filename };
   }
 
-  async getCvFile(cvId: string): Promise<Express.Multer.File> {
+  async getCvFile(cvId: string): Promise<StreamableFile> {
     const cvBucket = this.getCvBucket();
+
     const { data, error } = await this.client.storage
       .from(cvBucket)
       .download(`${cvId}.pdf`);
@@ -54,13 +59,10 @@ export class SupabaseStorageService {
     const buffer = Buffer.from(await data.arrayBuffer());
     const filename = `${cvId}.pdf`;
 
-    return {
-      fieldname: 'cv',
-      originalname: filename,
-      encoding: '7bit',
-      mimetype: 'application/pdf',
-      size: buffer.length,
-      buffer,
-    } as Express.Multer.File;
+    return new StreamableFile(buffer, {
+      type: 'application/pdf',
+      disposition: `inline; filename="${filename}"`,
+      length: buffer.length,
+    });
   }
 }
