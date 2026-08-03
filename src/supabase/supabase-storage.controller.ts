@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, StreamableFile } from '@nestjs/common';
 import { SupabaseStorageService } from './supabase-storage.service';
 
 @Controller('storage')
@@ -8,7 +8,7 @@ export class SupabaseStorageController {
   ) {}
 
   @Get('files/:cvId')
-  async getCvFile(@Param('cvId') cvId: string): Promise<Express.Multer.File> {
-    return await this.supabaseStorageService.getCvFile(cvId);
+  getCvFile(@Param('cvId') cvId: string): Promise<StreamableFile> {
+    return this.supabaseStorageService.getCvFile(cvId);
   }
 }
