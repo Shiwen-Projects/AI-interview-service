@@ -13,7 +13,12 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response as ExpressResponse } from 'express';
 import { CVFileValidationPipe } from './pipes';
 import { InterviewService } from './interview.service';
-import { CreateInterviewSessionDto, InterviewSessionResponseDto } from './dto';
+import {
+  CreateInterviewSessionDto,
+  InterviewSessionResponseDto,
+  SaveInterviewAnswerDto,
+} from './dto';
+import { InterviewAnswerEvaluation } from './types';
 
 @Controller('sessions')
 export class InterviewController {
@@ -44,6 +49,32 @@ export class InterviewController {
     return await this.interviewService.createInterviewStreamQuestions(
       sessionId,
       response,
+    );
+  }
+
+  @Post(':sessionId/questions/:questionId/answer')
+  async saveInterviewAnswer(
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
+    @Param('questionId', new ParseUUIDPipe()) questionId: string,
+    @Body() dto: SaveInterviewAnswerDto,
+  ): Promise<void> {
+    return await this.interviewService.saveInterviewAnswer(
+      sessionId,
+      questionId,
+      dto,
+    );
+  }
+
+  @Post(':sessionId/questions/:questionId/evaluate')
+  async evaluateInterviewAnswer(
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
+    @Param('questionId', new ParseUUIDPipe()) questionId: string,
+    @Body() dto: SaveInterviewAnswerDto,
+  ): Promise<InterviewAnswerEvaluation> {
+    return await this.interviewService.evaluateInterviewAnswer(
+      sessionId,
+      questionId,
+      dto,
     );
   }
 }

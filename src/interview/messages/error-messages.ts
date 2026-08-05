@@ -4,3 +4,7 @@ export const CREATE_INTERVIEW_SESSION_ERROR_MESSAGES = {
     POST_REQUIRED: 'The post is required',
     JOB_DESCRIPTION_REQUIRED: 'The job description is required',
 };
+
+export const INTERVIEW_QUESTION_ANSWER_ERROR_MESSAGES = {
+    ANSWER_REQUIRED: 'The answer is required',
+};

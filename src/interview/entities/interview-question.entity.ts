@@ -5,6 +5,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { InterviewAnswer } from '../types';
 
 @Entity('questions')
 export class InterviewQuestion {
@@ -17,13 +18,12 @@ export class InterviewQuestion {
   @Column({ type: 'text' })
   question!: string;
 
+  @Column({ type: 'jsonb' })
+  answer!: InterviewAnswer;
+
   @CreateDateColumn()
   createdAt!: Date;
 
   @UpdateDateColumn()
   updatedAt!: Date;
-
-    // TODO: Add category and answer SOON
-    //   @Column({ nullable: true })
-    //   category?: QuestionCategory;
 }

@@ -198,3 +198,96 @@ The backend does not implement a stream timeout. Any client-side timeout or retr
 policy must be handled by the frontend.
 
 ---
+
+## 4. Save & Evaluate Answer
+
+The backend provides separate endpoints for saving a draft answer and submitting
+an answer to DeepSeek for evaluation. Both endpoints require the question to
+belong to the specified session.
+
+### 💾 4.1 Save answer
+
+**`POST /api/sessions/:sessionId/questions/:questionId/answer`**
+
+Saves the candidate's answer without evaluating it. Calling this endpoint again
+replaces the previously stored answer.
+
+#### 📥 Request
+
+`sessionId` and `questionId` must be valid UUIDs.
+
+Content type: `application/json`
+
+```ts
+{
+  answer: string; // required; surrounding whitespace is removed
+}
+```
+
+An empty, whitespace-only, missing, or non-string `answer` is rejected with
+HTTP 400.
+
+#### 📤 Response
+
+```text
+HTTP 201 Created
+```
+
+The response has no body. The question's `answer` JSON column is stored as:
+
+```ts
+{
+  answer: string;
+}
+```
+
+### 🧠 4.2 Evaluate answer
+
+**`POST /api/sessions/:sessionId/questions/:questionId/evaluate`**
+
+Evaluates the submitted answer against the interview question, target role, job
+description, and CV. The backend requests a JSON evaluation from DeepSeek,
+validates it, and then saves the answer together with its score and feedback.
+
+#### 📥 Request
+
+`sessionId` and `questionId` must be valid UUIDs.
+
+Content type: `application/json`
+
+```ts
+{
+  answer: string; // required; surrounding whitespace is removed
+}
+```
+
+#### 📤 Response
+
+```ts
+// HTTP 201 Created
+{
+  score: number;   // integer from 0 to 100
+  feedback: string; // non-empty, with surrounding whitespace removed
+}
+```
+
+#### 🔄 Flow
+
+```text
+Client                                    Backend
+  │  POST .../:questionId/evaluate           │
+  │  { answer }                              │
+  ├────────────────────────────────────────>│
+  │                                         │ 1. Validate both UUIDs and the body
+  │                                         │ 2. Load the session and question
+  │                                         │ 3. Build the evaluation prompt
+  │                                         │ 4. Call DeepSeek in JSON mode
+  │                                         │ 5. Parse and validate score/feedback
+  │                                         │ 6. Persist answer and evaluation
+  │  201 { score, feedback }                │
+  │<────────────────────────────────────────┤
+```
+
+The evaluation is persisted only after DeepSeek returns valid JSON containing an
+integer `score` between 0 and 100 and a non-empty string `feedback`. If the
+evaluation request fails, this endpoint does not save the submitted answer.
