@@ -9,3 +9,11 @@ export interface DeepSeekStreamChunk {
     };
   }>;
 }
+
+export interface DeepSeekChatCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}

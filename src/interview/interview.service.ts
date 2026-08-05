@@ -15,12 +15,21 @@ import {
   InterviewQuestionStreamEvent,
   InterviewSessionStatus,
 } from './constants';
-import { getPromptMessage } from './messages';
+import {
+  getEvaluateInterviewAnswerPrompt,
+  getInterviewQuestionsPromptMessage,
+} from './messages';
 import { Response } from 'express';
 import { InterviewQuestion } from './entities/interview-question.entity';
-import type { DeepSeekStreamChunk, GeneratedQuestion } from './types';
+import type {
+  DeepSeekChatCompletionResponse,
+  DeepSeekStreamChunk,
+  GeneratedQuestion,
+  InterviewAnswerEvaluation,
+} from './types';
 import { extractQuestionsFromJsonStream } from './utils';
 import { extractTextFromPdf } from '../utils/files';
+import { SaveInterviewAnswerDto } from './dto';
 
 @Injectable()
 export class InterviewService {
@@ -143,7 +152,7 @@ export class InterviewService {
       console.log('preparing - Reading CV, position and job description...');
 
       const cvContent = session.cvContent;
-      const prompt = getPromptMessage(
+      const prompt = getInterviewQuestionsPromptMessage(
         cvContent,
         session.post,
         session.jobDescription,
@@ -229,6 +238,149 @@ export class InterviewService {
       });
       response.end();
     }
+  }
+
+  async saveInterviewAnswer(
+    sessionId: string,
+    questionId: string,
+    dto: SaveInterviewAnswerDto,
+  ): Promise<void> {
+    const session = await this.interviewSessionRepository.findOne({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Session not found');
+    }
+
+    const question = await this.interviewQuestionRepository.findOne({
+      where: { id: questionId, sessionId: session.id },
+    });
+
+    if (!question) {
+      throw new NotFoundException('Question not found');
+    }
+
+    await this.interviewQuestionRepository.update(questionId, {
+      answer: {
+        answer: dto.answer,
+      },
+    });
+  }
+
+  async evaluateInterviewAnswer(
+    sessionId: string,
+    questionId: string,
+    dto: SaveInterviewAnswerDto,
+  ): Promise<InterviewAnswerEvaluation> {
+    // Step 1: get the session and question
+    const session = await this.interviewSessionRepository.findOne({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Session not found');
+    }
+
+    const question = await this.interviewQuestionRepository.findOne({
+      where: { id: questionId, sessionId: session.id },
+    });
+
+    if (!question) {
+      throw new NotFoundException('Question not found');
+    }
+
+    // Step 2: generate prompt
+    const cvContent = session.cvContent;
+    const post = session.post;
+    const jdContent = session.jobDescription;
+    const prompt = getEvaluateInterviewAnswerPrompt(
+      cvContent,
+      post,
+      jdContent,
+      question.question,
+      dto.answer,
+    );
+
+    // Step 3: evaluate the answer by DeepSeek API
+    const apiKey = this.deepSeekApiKey;
+    const baseUrl = this.deepSeekBaseUrl;
+    const model = this.deepSeekModel;
+    const apiResponse = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You evaluate interview answers and return only valid JSON.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.4,
+        response_format: { type: 'json_object' },
+      }),
+    });
+
+    if (!apiResponse.ok) {
+      throw new BadGatewayException(
+        `DeepSeek request failed with status ${apiResponse.status}`,
+      );
+    }
+
+    const responseBody =
+      (await apiResponse.json()) as DeepSeekChatCompletionResponse;
+    const content = responseBody.choices?.[0]?.message?.content;
+
+    if (!content) {
+      throw new BadGatewayException(
+        'DeepSeek response did not include an evaluation',
+      );
+    }
+
+    // Step 4: test the evaluation result is valid
+    let evaluation: InterviewAnswerEvaluation;
+
+    try {
+      evaluation = JSON.parse(content) as InterviewAnswerEvaluation;
+    } catch {
+      throw new BadGatewayException(
+        'DeepSeek returned an invalid evaluation response',
+      );
+    }
+
+    if (
+      !Number.isInteger(evaluation.score) ||
+      evaluation.score < 0 ||
+      evaluation.score > 100 ||
+      typeof evaluation.feedback !== 'string' ||
+      !evaluation.feedback.trim()
+    ) {
+      throw new BadGatewayException(
+        'DeepSeek returned an invalid evaluation result',
+      );
+    }
+
+    evaluation.feedback = evaluation.feedback.trim();
+
+    await this.interviewQuestionRepository.update(questionId, {
+      answer: {
+        answer: dto.answer,
+        score: evaluation.score,
+        feedback: evaluation.feedback,
+      },
+    });
+
+    // Step 5: return the evaluation
+    return evaluation;
   }
 
   private async streamDeepSeekQuestions(
