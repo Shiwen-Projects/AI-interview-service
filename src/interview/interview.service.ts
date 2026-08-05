@@ -95,6 +95,7 @@ export class InterviewService {
         select: {
           id: true,
           question: true,
+          answer: true,
         },
         order: {
           createdAt: 'ASC',
@@ -109,6 +110,7 @@ export class InterviewService {
       questions: questions.map((question) => ({
         id: question.id,
         question: question.question,
+        answer: question.answer,
       })),
     };
   }
