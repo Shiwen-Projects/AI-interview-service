@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Res,
   UploadedFile,
   UseInterceptors,
@@ -15,7 +17,10 @@ import { CVFileValidationPipe } from './pipes';
 import { InterviewService } from './interview.service';
 import {
   CreateInterviewSessionDto,
+  BatchDeleteInterviewSessionsDto,
+  GetPaginatedInterviewSessionsDto,
   InterviewSessionResponseDto,
+  PaginatedInterviewSessionResponseDto,
   SaveInterviewAnswerDto,
 } from './dto';
 import { InterviewAnswerEvaluation } from './types';
@@ -34,6 +39,22 @@ export class InterviewController {
     return this.interviewService.createInterviewSession({ cv, ...dto });
   }
 
+  @Get()
+  async getPaginatedInterviewSessions(
+    @Query() query: GetPaginatedInterviewSessionsDto,
+  ): Promise<PaginatedInterviewSessionResponseDto> {
+    return await this.interviewService.getPaginatedInterviewSessions(query);
+  }
+
+  @Delete()
+  async batchDeleteInterviewSessions(
+    @Body() dto: BatchDeleteInterviewSessionsDto,
+  ): Promise<void> {
+    return await this.interviewService.batchDeleteInterviewSessions(
+      dto.sessionIds,
+    );
+  }
+
   @Get(':sessionId')
   async getInterviewSession(
     @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
@@ -50,6 +71,13 @@ export class InterviewController {
       sessionId,
       response,
     );
+  }
+
+  @Delete(':sessionId')
+  async deleteInterviewSession(
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
+  ): Promise<void> {
+    return await this.interviewService.deleteInterviewSession(sessionId);
   }
 
   @Post(':sessionId/questions/:questionId/answer')
