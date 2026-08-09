@@ -65,4 +65,17 @@ export class SupabaseStorageService {
       length: buffer.length,
     });
   }
+
+  async deleteCvFile(cvId: string): Promise<void> {
+    const cvBucket = this.getCvBucket();
+    const { error } = await this.client.storage
+      .from(cvBucket)
+      .remove([`${cvId}.pdf`]);
+
+    if (error) {
+      throw new InternalServerErrorException(
+        `CV delete failed: ${error.message}`,
+      );
+    }
+  }
 }

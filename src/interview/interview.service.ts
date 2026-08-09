@@ -7,10 +7,14 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { SupabaseStorageService } from '../supabase/supabase-storage.service';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { InterviewSession } from './entities/interview-session.entity';
-import { InterviewSessionResponseDto } from './dto/interview.dto';
+import {
+  InterviewSessionResponseDto,
+  PaginatedInterviewSessionResponseDto,
+  GetPaginatedInterviewSessionsDto,
+} from './dto/interview.dto';
 import {
   InterviewQuestionStreamEvent,
   InterviewSessionStatus,
@@ -42,32 +46,6 @@ export class InterviewService {
     private readonly supabaseStorageService: SupabaseStorageService,
     private readonly configService: ConfigService,
   ) {}
-
-  async createInterviewSession(input: {
-    cv: Express.Multer.File;
-    post: string;
-    jobDescription: string;
-  }): Promise<{ sessionId: string }> {
-    const sessionId = randomUUID();
-    const cvFile = await this.supabaseStorageService.uploadCv(input.cv);
-    const cvContent = await extractTextFromPdf(input.cv);
-
-    if (!cvContent) {
-      throw new InternalServerErrorException('Failed to extract text from CV');
-    }
-
-    const session = this.interviewSessionRepository.create({
-      id: sessionId,
-      cv: cvFile,
-      cvContent,
-      status: InterviewSessionStatus.Created,
-      post: input.post,
-      jobDescription: input.jobDescription,
-    });
-    await this.interviewSessionRepository.save(session);
-
-    return { sessionId: session.id };
-  }
 
   async getInterviewSession(
     sessionId: string,
@@ -113,6 +91,107 @@ export class InterviewService {
         answer: question.answer,
       })),
     };
+  }
+
+  async getPaginatedInterviewSessions(
+    input: GetPaginatedInterviewSessionsDto,
+  ): Promise<PaginatedInterviewSessionResponseDto> {
+    const [sessions, total] =
+      await this.interviewSessionRepository.findAndCount({
+        select: {
+          id: true,
+          post: true,
+          jobDescription: true,
+        },
+        order: {
+          createdAt: 'DESC',
+        },
+        skip: (input.page - 1) * input.limit,
+        take: input.limit,
+      });
+
+    return {
+      items: sessions.map((session) => ({
+        id: session.id,
+        post: session.post,
+        jobDescription: session.jobDescription,
+      })),
+      page: input.page,
+      limit: input.limit,
+      total,
+      totalPages: Math.ceil(total / input.limit) || 0,
+    };
+  }
+
+  async createInterviewSession(input: {
+    cv: Express.Multer.File;
+    post: string;
+    jobDescription: string;
+  }): Promise<{ sessionId: string }> {
+    const sessionId = randomUUID();
+    const cvFile = await this.supabaseStorageService.uploadCv(input.cv);
+    const cvContent = await extractTextFromPdf(input.cv);
+
+    if (!cvContent) {
+      throw new InternalServerErrorException('Failed to extract text from CV');
+    }
+
+    const session = this.interviewSessionRepository.create({
+      id: sessionId,
+      cv: cvFile,
+      cvContent,
+      status: InterviewSessionStatus.Created,
+      post: input.post,
+      jobDescription: input.jobDescription,
+    });
+    await this.interviewSessionRepository.save(session);
+
+    return { sessionId: session.id };
+  }
+
+  async deleteInterviewSession(sessionId: string): Promise<void> {
+    const session = await this.interviewSessionRepository.findOne({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Session not found');
+    }
+
+    await this.interviewQuestionRepository.delete({ sessionId: session.id });
+    await this.interviewSessionRepository.delete({ id: session.id });
+
+    const cvId = session.cv?.id;
+    if (cvId) {
+      await this.supabaseStorageService.deleteCvFile(cvId);
+    }
+  }
+
+  async batchDeleteInterviewSessions(sessionIds: string[]): Promise<void> {
+    const uniqueIds = [...new Set(sessionIds)];
+
+    if (uniqueIds.length === 0) {
+      return;
+    }
+
+    const sessions = await this.interviewSessionRepository.find({
+      where: { id: In(uniqueIds) },
+    });
+
+    if (sessions.length !== uniqueIds.length) {
+      throw new NotFoundException('One or more sessions not found');
+    }
+
+    const ids = sessions.map((session) => session.id);
+    await this.interviewQuestionRepository.delete({ sessionId: In(ids) });
+    await this.interviewSessionRepository.delete({ id: In(ids) });
+
+    const cvIds = sessions
+      .map((session) => session.cv?.id)
+      .filter((cvId): cvId is string => Boolean(cvId));
+    await Promise.all(
+      cvIds.map((cvId) => this.supabaseStorageService.deleteCvFile(cvId)),
+    );
   }
 
   /*
