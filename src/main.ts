@@ -12,6 +12,6 @@ async function bootstrap() {
   // Validation pipe: strip out properties that are not in the DTO
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
-  await app.listen(process.env.DEFAULT_PORT ?? 3000);
+  await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }
 bootstrap();
