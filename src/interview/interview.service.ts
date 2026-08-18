@@ -1,5 +1,6 @@
 import {
   BadGatewayException,
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -207,6 +208,14 @@ export class InterviewService {
 
     if (!session) {
       throw new NotFoundException('Session not found');
+    }
+
+    // Not allow gennerte if the session exists more than 10 questions
+    const questions = await this.interviewQuestionRepository.find({
+      where: { sessionId: session.id },
+    });
+    if (questions.length >= 10) {
+      throw new BadRequestException('Session has reached the maximum number of questions');
     }
 
     // Set headers to tell the browser to keep the HTTP connection open for SSE.
